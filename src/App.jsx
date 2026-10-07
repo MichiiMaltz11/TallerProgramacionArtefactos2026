@@ -1,21 +1,83 @@
+import { useEffect, useState } from 'react'
+import mqtt from 'mqtt'
 import './App.css'
 
-const hourlyForecast = [
-  { time: 'Ahora', icon: '☀', temperature: 24 },
-  { time: '12:00', icon: '☀', temperature: 26 },
-  { time: '15:00', icon: '◐', temperature: 27 },
-  { time: '18:00', icon: '☼', temperature: 23 },
-  { time: '21:00', icon: '☾', temperature: 20 },
-]
+const MQTT_URL = import.meta.env.VITE_MQTT_URL || 'ws://localhost:9001'
+const MQTT_TOPICS = {
+  temperature: import.meta.env.VITE_MQTT_TEMPERATURE_TOPIC || 'clima/esp32/temperatura',
+  humidity: import.meta.env.VITE_MQTT_HUMIDITY_TOPIC || 'clima/esp32/humedad',
+  sunlight: import.meta.env.VITE_MQTT_SUNLIGHT_TOPIC || 'clima/esp32/luz',
+}
+const fallbackReading = { temperature: 24, humidity: 58, sunlight: 74 }
+const fallbackHistory = [24, 26, 27, 23, 20]
+
+function parseSensorValue(message, fieldNames) {
+  const text = message.toString().trim()
+  try {
+    const payload = JSON.parse(text)
+    const value = fieldNames.map((field) => payload[field]).find((item) => item !== undefined)
+    return Number(value)
+  } catch {
+    return Number(text)
+  }
+}
+
+function getWeatherCondition(sunlight) {
+  if (sunlight < 20) return { label: 'Lluvioso', icon: '☔' }
+  if (sunlight < 65) return { label: 'Parcialmente nublado', icon: '◐' }
+  return { label: 'Soleado', icon: '☀' }
+}
 
 function App() {
-  const formatTemperature = (temperature) => `${temperature}°`
+  const [reading, setReading] = useState(fallbackReading)
+  const [temperatureHistory, setTemperatureHistory] = useState(fallbackHistory)
+  const [connectionState, setConnectionState] = useState('Conectando...')
+
+  useEffect(() => {
+    const client = mqtt.connect(MQTT_URL, { reconnectPeriod: 3000, connectTimeout: 10000 })
+    const topics = Object.values(MQTT_TOPICS)
+
+    client.on('connect', () => {
+      setConnectionState('Sistema en linea')
+      client.subscribe(topics)
+    })
+    client.on('reconnect', () => setConnectionState('Reconectando...'))
+    client.on('offline', () => setConnectionState('Sin conexion'))
+    client.on('error', () => setConnectionState('Error de conexion'))
+    client.on('message', (topic, message) => {
+      const topicFields = {
+        [MQTT_TOPICS.temperature]: ['temperatura', 'temperature', 'valor'],
+        [MQTT_TOPICS.humidity]: ['humedad', 'humidity', 'valor'],
+        [MQTT_TOPICS.sunlight]: ['luz', 'sunlight', 'valor'],
+      }
+      const value = parseSensorValue(message, topicFields[topic] || ['valor'])
+      if (!Number.isFinite(value)) return
+
+      if (topic === MQTT_TOPICS.temperature) {
+        setReading((current) => ({ ...current, temperature: value }))
+        setTemperatureHistory((history) => [...history.slice(-4), value])
+      }
+      if (topic === MQTT_TOPICS.humidity) setReading((current) => ({ ...current, humidity: value }))
+      if (topic === MQTT_TOPICS.sunlight) setReading((current) => ({ ...current, sunlight: value }))
+    })
+
+    return () => client.end()
+  }, [])
+
+  const formatTemperature = (temperature) => `${Math.round(temperature)}°`
+  const history = temperatureHistory.slice(-5)
+  const weather = getWeatherCondition(reading.sunlight)
+  const points = history.map((temperature, index) => {
+    const x = history.length === 1 ? 300 : 25 + index * (550 / (history.length - 1))
+    const y = 145 - ((temperature - 18) / 12) * 100
+    return `${x},${Math.max(35, Math.min(145, y))}`
+  }).join(' ')
 
   return (
     <div className="app-shell">
-      <aside className="sidebar"><div className="brand"><span className="brand-mark">◒</span><span>Clima<span className="brand-accent">Lab</span></span></div><nav className="nav-list" aria-label="Navegacion principal"><a className="nav-item active" href="#dashboard"><span>⌂</span> Dashboard</a></nav><div className="sidebar-footer"><div className="status-dot"></div><div><strong>Sistema en linea</strong><small>Actualizado hace 2 min</small></div></div></aside>
+      <aside className="sidebar"><div className="brand"><span className="brand-mark">◒</span><span>Clima<span className="brand-accent">Lab</span></span></div><nav className="nav-list" aria-label="Navegacion principal"><a className="nav-item active" href="#dashboard"><span>⌂</span> Dashboard</a></nav><div className="sidebar-footer"><div className={`status-dot ${connectionState === 'Sistema en linea' ? '' : 'status-warning'}`}></div><div><strong>{connectionState}</strong><small>MQTT · 3 topics</small></div></div></aside>
       <main className="main-content" id="dashboard"><header className="topbar"><div><h1>Resumen del clima</h1></div></header><section className="location-row"><div><span className="location-pin">⌖</span><strong>San Salvador, El Salvador</strong><span className="unit-fixed">°C</span></div></section>
-        <section className="dashboard-grid"><article className="current-weather card"><div className="weather-heading"><div><p className="label">CONDICIÓN ACTUAL</p><h2>Parcialmente nublado</h2></div><span className="weather-symbol">☀</span></div><div className="current-temperature">{formatTemperature(24)}<span>C</span></div><div className="temperature-range"><span>Min {formatTemperature(17)}</span><span className="range-line"></span><span>Max {formatTemperature(28)}</span></div><p className="weather-note">Sensación térmica de {formatTemperature(25)} · Viento suave del norte</p></article><article className="metric-card card"><div className="metric-icon blue">≈</div><div><p className="label">HUMEDAD</p><strong>58<span>%</span></strong><p className="metric-caption">Nivel confortable</p></div><div className="metric-ring ring-blue"><span>58%</span></div></article><article className="metric-card card"><div className="metric-icon yellow">☼</div><div><p className="label">LUZ SOLAR</p><strong>74<span>%</span></strong><p className="metric-caption">Radiación moderada</p></div><div className="metric-ring ring-yellow"><span>6.2 h</span></div></article><article className="forecast-card card" id="pronostico"><div className="card-header"><div><p className="label">TEMPERATURA RECIENTE</p><h2>Registro reciente</h2></div></div><div className="line-chart"><svg viewBox="0 0 600 190" role="img" aria-label="Gráfica lineal de temperatura reciente" preserveAspectRatio="none"><line className="chart-gridline" x1="0" y1="35" x2="600" y2="35" /><line className="chart-gridline" x1="0" y1="85" x2="600" y2="85" /><line className="chart-gridline" x1="0" y1="135" x2="600" y2="135" /><polyline className="chart-line" points="25,125 162,88 300,55 437,102 575,145" /><circle className="chart-point" cx="25" cy="125" r="5" /><circle className="chart-point" cx="162" cy="88" r="5" /><circle className="chart-point" cx="300" cy="55" r="5" /><circle className="chart-point" cx="437" cy="102" r="5" /><circle className="chart-point" cx="575" cy="145" r="5" /></svg><div className="chart-labels">{hourlyForecast.map((item) => <span key={item.time}>{item.time}<strong>{formatTemperature(item.temperature)}</strong></span>)}</div></div></article></section>
+        <section className="dashboard-grid"><article className="current-weather card"><div className="weather-heading"><div><p className="label">CONDICIÓN ACTUAL</p><h2>{weather.label}</h2></div><span className="weather-symbol" aria-label={weather.label}>{weather.icon}</span></div><div className="current-temperature">{formatTemperature(reading.temperature)}<span>C</span></div></article><article className="metric-card card"><div className="metric-icon blue">≈</div><div><p className="label">HUMEDAD</p><strong>{Math.round(reading.humidity)}<span>%</span></strong><p className="metric-caption">Nivel confortable</p></div><div className="metric-ring ring-blue"><span>{Math.round(reading.humidity)}%</span></div></article><article className="metric-card card"><div className="metric-icon yellow">☼</div><div><p className="label">LUZ SOLAR</p><strong>{Math.round(reading.sunlight)}<span>%</span></strong><p className="metric-caption">Lectura del sensor</p></div><div className="metric-ring ring-yellow"><span>{(reading.sunlight * 0.084).toFixed(1)} h</span></div></article><article className="forecast-card card" id="pronostico"><div className="card-header"><div><p className="label">TEMPERATURA RECIENTE</p><h2>Últimas 5 mediciones</h2></div></div><div className="line-chart"><svg viewBox="0 0 600 190" role="img" aria-label="Gráfica lineal de las últimas mediciones de temperatura" preserveAspectRatio="none"><line className="chart-gridline" x1="0" y1="35" x2="600" y2="35" /><line className="chart-gridline" x1="0" y1="85" x2="600" y2="85" /><line className="chart-gridline" x1="0" y1="135" x2="600" y2="135" /><polyline className="chart-line" points={points} />{history.map((temperature, index) => { const x = history.length === 1 ? 300 : 25 + index * (550 / (history.length - 1)); const y = Math.max(35, Math.min(145, 145 - ((temperature - 18) / 12) * 100)); return <circle className="chart-point" cx={x} cy={y} r="5" key={`${temperature}-${index}`} /> })}</svg><div className="chart-labels">{history.map((temperature, index) => <span key={`${temperature}-label-${index}`}><strong>{formatTemperature(temperature)}</strong></span>)}</div></div></article></section>
       </main>
     </div>
   )
