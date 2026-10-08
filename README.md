@@ -143,6 +143,20 @@ VITE_MQTT_SUNLIGHT_TOPIC=clima/esp32/luz
 
 ## 5. Iniciar Mosquitto con Docker
 
+Importante: estos comandos deben ejecutarse desde la raíz del proyecto, donde existe `docker-compose.yml`:
+
+### Linux
+
+```bash
+cd ~/Desktop/TallerProgramacionArtefactos2026
+```
+
+### Windows PowerShell
+
+```powershell
+cd "$HOME\Desktop\TallerProgramacionArtefactos2026"
+```
+
 Desde la raíz del proyecto, ejecutar:
 
 ```bash
@@ -240,12 +254,14 @@ También se acepta un JSON por topic, por ejemplo:
 Para probar la interfaz manualmente, publicar mensajes desde el contenedor de Mosquitto:
 
 ```bash
-docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/temperatura -m 26
-docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/humedad -m 61
-docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/luz -m 12
+docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/temperatura -m 26 -r
+docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/humedad -m 61 -r
+docker compose exec mosquitto mosquitto_pub -h localhost -t clima/esp32/luz -m 12 -r
 ```
 
 El dashboard debe mostrar `26°`, `61%` y el estado `Lluvioso`. Publicar otra temperatura agrega un punto a la gráfica y conserva solo las cinco más recientes.
+
+La opción `-r` guarda el último valor en Mosquitto. Así, si React se conecta después de publicar o se recarga el navegador, recibe inmediatamente la última medición.
 
 ## 9. Problemas frecuentes
 
@@ -272,7 +288,7 @@ Confirmar que los puertos `1883` y `9001` no estén ocupados por otro programa.
 
 ### React muestra `Sin conexion`
 
-Confirmar que Mosquitto está activo con `docker compose ps`. Si React se ejecuta desde otra computadora, no usar `localhost`: reemplazarlo por la IP del equipo donde corre Docker en `VITE_MQTT_URL`.
+Confirmar que Mosquitto está activo con `docker compose ps` y que el comando se ejecutó desde la raíz del proyecto. En la consola del navegador deben aparecer los mensajes `[MQTT] Conectado a` y `[MQTT] Suscrito a`. Si React se ejecuta desde otra computadora, no usar `localhost`: reemplazarlo por la IP del equipo donde corre Docker en `VITE_MQTT_URL`.
 
 ### La ESP32 no conecta
 
